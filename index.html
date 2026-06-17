@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <base target="_top">
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; margin: 0; padding: 20px; background-color: #f4f4f9; }
+        h1 { color: #333; font-size: 20px; }
+        #webcam-container { margin: 20px auto; border-radius: 10px; overflow: hidden; max-width: 100%; width: 320px; height: 320px; background: #000; }
+        canvas { width: 100% !important; height: 100% !important; object-fit: cover; }
+        #label-container { margin-top: 20px; display: flex; flex-direction: column; align-items: center; }
+        /* Qui risolviamo il testo tagliato: diamo molto spazio e font grande */
+        .result-box { width: 90%; max-width: 400px; padding: 15px; margin: 8px 0; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); font-size: 18px; font-weight: bold; text-align: left; display: flex; justify-content: space-between; }
+        .match { border-left: 8px solid #4CAF50; color: #4CAF50; }
+    </style>
+</head>
+<body>
+
+    <h1>Riconoscimento Componenti</h1>
+    <div id="webcam-container"></div>
+    <div id="label-container"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-models/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+    
+    <script type="text/javascript">
+        // ⚠️ SOSTITUISCI QUESTO LINK CON IL TUO LINK DI TEACHABLE MACHINE
+        const URL = "https://teachablemachine.withgoogle.com/models/kdr1ikNOa/";
+
+        let model, webcam, labelContainer, maxLabels;
+
+        async function init() {
+            const modelURL = URL + "model.json";
+            const metadataURL = URL + "metadata.json";
+
+            model = await tmImage.load(modelURL, metadataURL);
+            maxLabels = model.getTotalClasses();
+
+            // Configurazione della fotocamera POSTERIORE per il cellulare
+            const flip = false; // Non ribaltare l'immagine a specchio
+            webcam = new tmImage.Webcam(320, 320, flip);
+            
+            // Forziamo l'uso della fotocamera posteriore (environment)
+            await webcam.setup({ facingMode: "environment" }); 
+            await webcam.play();
+            window.requestAnimationFrame(loop);
+
+            document.getElementById("webcam-container").appendChild(webcam.canvas);
+            labelContainer = document.getElementById("label-container");
+            for (let i = 0; i < maxLabels; i++) {
+                const div = document.createElement("div");
+                div.className = "result-box";
+                labelContainer.appendChild(div);
+            }
+        }
+
+        async function loop() {
+            webcam.update();
+            await predict();
+            window.requestAnimationFrame(loop);
+        }
+
+        async function predict() {
+            const prediction = await model.predict(webcam.canvas);
+            
+            // Ordina i risultati per mostrare la percentuale più alta in cima
+            prediction.sort((a, b) => b.probability - a.probability);
+
+            for (let i = 0; i < maxLabels; i++) {
+                const classPrediction = prediction[i].className;
+                const percentage = (prediction[i].probability * 100).toFixed(0);
+                
+                // Se la percentuale è alta evidenzia il pezzo in verde
+                const isTop = i === 0 && percentage > 50; 
+                
+                labelContainer.childNodes[i].className = isTop ? "result-box match" : "result-box";
+                labelContainer.childNodes[i].innerHTML = `<span>${classPrediction}</span> <span>${percentage}%</span>`;
+            }
+        }
+
+        // Avvia automaticamente l'app al caricamento della pagina
+        window.onload = init;
+    </script>
+</body>
+</html>
