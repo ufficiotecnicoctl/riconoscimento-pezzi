@@ -1,84 +1,148 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <base target="_top">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Riconoscimento Componenti</title>
     <style>
         body { font-family: Arial, sans-serif; text-align: center; margin: 0; padding: 20px; background-color: #f4f4f9; }
         h1 { color: #333; font-size: 20px; }
-        #webcam-container { margin: 20px auto; border-radius: 10px; overflow: hidden; max-width: 100%; width: 320px; height: 320px; background: #000; }
-        canvas { width: 100% !important; height: 100% !important; object-fit: cover; }
+        #webcam-container { margin: 20px auto; border-radius: 10px; overflow: hidden; max-width: 100%; width: 320px; height: 320px; background: #000; position: relative; }
+        video { width: 100%; height: 100%; object-fit: cover; }
         #label-container { margin-top: 20px; display: flex; flex-direction: column; align-items: center; }
-        /* Qui risolviamo il testo tagliato: diamo molto spazio e font grande */
         .result-box { width: 90%; max-width: 400px; padding: 15px; margin: 8px 0; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); font-size: 18px; font-weight: bold; text-align: left; display: flex; justify-content: space-between; }
         .match { border-left: 8px solid #4CAF50; color: #4CAF50; }
+        button { padding: 12px 24px; font-size: 16px; font-weight: bold; background-color: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; margin-top: 10px; }
+        button:hover { background-color: #0056b3; }
+        #status-msg { color: #555; font-size: 14px; margin-top: 10px; padding: 0 10px; }
     </style>
 </head>
 <body>
 
     <h1>Riconoscimento Componenti</h1>
-    <div id="webcam-container"></div>
+    
+    <button id="start-btn" onclick="init()">AVVIA FOTOCAMERA</button>
+    
+    <div id="status-msg">Clicca sul pulsante in alto per iniziare.</div>
+
+    <div id="webcam-container">
+        <video id="video" autoplay playsinline muted></video>
+    </div>
+    
     <div id="label-container"></div>
 
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-models/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
     
     <script type="text/javascript">
-        // ⚠️ SOSTITUISCI QUESTO LINK CON IL TUO LINK DI TEACHABLE MACHINE
-        const URL = "https://teachablemachine.withgoogle.com/models/kdr1ikNOa/";
+        // ⚠️ INCOLLA QUI IL TUO LINK DI TEACHABLE MACHINE (lascia lo slash finale)
+        const URL = "https://teachablemachine.withgoogle.com/models/1RTwqiMN7yOt1x4oRFhgxsV1dn_g2yARX/";
 
-        let model, webcam, labelContainer, maxLabels;
+        let model, labelContainer, maxLabels, isModelLoaded = false;
+        const video = document.getElementById('video');
+        const statusMsg = document.getElementById('status-msg');
+        const startBtn = document.getElementById('start-btn');
+
+        // Carica il modello in background all'apertura della pagina
+        async function loadModel() {
+            try {
+                statusMsg.innerText = "Caricamento modello IA in corso...";
+                const modelURL = URL + "model.json";
+                const metadataURL = URL + "metadata.json";
+                model = await tmImage.load(modelURL, metadataURL);
+                maxLabels = model.getTotalClasses();
+                isModelLoaded = true;
+                statusMsg.innerText = "Modello pronto. Clicca su 'AVVIA FOTOCAMERA'.";
+            } catch (e) {
+                statusMsg.style.color = "red";
+                statusMsg.innerText = "Errore nel caricamento del modello. Controlla il link di Teachable Machine.";
+                console.error(e);
+            }
+        }
 
         async function init() {
-            const modelURL = URL + "model.json";
-            const metadataURL = URL + "metadata.json";
+            if (!isModelLoaded) {
+                alert("Attendi il caricamento del modello prima di avviare.");
+                return;
+            }
 
-            model = await tmImage.load(modelURL, metadataURL);
-            maxLabels = model.getTotalClasses();
+            startBtn.style.display = 'none'; // Nasconde il pulsante dopo il click
+            statusMsg.innerText = "Richiesta accesso alla fotocamera...";
 
-            // Configurazione della fotocamera POSTERIORE per il cellulare
-            const flip = false; // Non ribaltare l'immagine a specchio
-            webcam = new tmImage.Webcam(320, 320, flip);
-            
-            // Forziamo l'uso della fotocamera posteriore (environment)
-            await webcam.setup({ facingMode: "environment" }); 
-            await webcam.play();
-            window.requestAnimationFrame(loop);
+            // Configurazione flessibile: prova la posteriore, se fallisce usa quella disponibile (PC)
+            const constraints = {
+                video: { facingMode: "environment" }
+            };
 
-            document.getElementById("webcam-container").appendChild(webcam.canvas);
-            labelContainer = document.getElementById("label-container");
-            for (let i = 0; i < maxLabels; i++) {
-                const div = document.createElement("div");
-                div.className = "result-box";
-                labelContainer.appendChild(div);
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                video.srcObject = stream;
+                
+                // Configura i contenitori dei testi dei risultati
+                labelContainer = document.getElementById("label-container");
+                labelContainer.innerHTML = ""; // Pulisce
+                for (let i = 0; i < maxLabels; i++) {
+                    const div = document.createElement("div");
+                    div.className = "result-box";
+                    labelContainer.appendChild(div);
+                }
+
+                video.addEventListener('loadeddata', () => {
+                    statusMsg.innerText = "Analisi in corso...";
+                    loop();
+                });
+
+            } catch (error) {
+                console.error("Errore primario fotocamera, provo fallback:", error);
+                // Fallback per PC (usa qualsiasi webcam disponibile)
+                try {
+                    const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                    video.srcObject = fallbackStream;
+                    
+                    labelContainer = document.getElementById("label-container");
+                    labelContainer.innerHTML = "";
+                    for (let i = 0; i < maxLabels; i++) {
+                        const div = document.createElement("div");
+                        div.className = "result-box";
+                        labelContainer.appendChild(div);
+                    }
+                    
+                    video.addEventListener('loadeddata', () => {
+                        statusMsg.innerText = "Analisi in corso (Modalità PC)...";
+                        loop();
+                    });
+                } catch (fallbackError) {
+                    statusMsg.style.color = "red";
+                    statusMsg.innerText = "Impossibile accedere alla fotocamera: " + fallbackError.message;
+                }
             }
         }
 
         async function loop() {
-            webcam.update();
-            await predict();
+            if(video.srcObject) {
+                await predict();
+            }
             window.requestAnimationFrame(loop);
         }
 
         async function predict() {
-            const prediction = await model.predict(webcam.canvas);
-            
-            // Ordina i risultati per mostrare la percentuale più alta in cima
+            const prediction = await model.predict(video);
             prediction.sort((a, b) => b.probability - a.probability);
 
             for (let i = 0; i < maxLabels; i++) {
                 const classPrediction = prediction[i].className;
                 const percentage = (prediction[i].probability * 100).toFixed(0);
+                const isTop = i === 0 && percentage > 30; 
                 
-                // Se la percentuale è alta evidenzia il pezzo in verde
-                const isTop = i === 0 && percentage > 50; 
-                
-                labelContainer.childNodes[i].className = isTop ? "result-box match" : "result-box";
-                labelContainer.childNodes[i].innerHTML = `<span>${classPrediction}</span> <span>${percentage}%</span>`;
+                if(labelContainer.childNodes[i]) {
+                    labelContainer.childNodes[i].className = isTop ? "result-box match" : "result-box";
+                    labelContainer.childNodes[i].innerHTML = `<span>${classPrediction}</span> <span>${percentage}%</span>`;
+                }
             }
         }
 
-        // Avvia automaticamente l'app al caricamento della pagina
-        window.onload = init;
+        // Avvia il caricamento del modello all'apertura
+        window.onload = loadModel;
     </script>
 </body>
 </html>
